@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - v*
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - linux_amd64
+          - darwin_amd64
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-go@v2
+        with:
+          go-version: '1.14'
+      - uses: actions/cache@v2
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-${{ hashFiles('**/go.sum') }}
+
+      # build
+      - run: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build
+        if: matrix.target == 'linux_amd64'
+      - run: GOOS=darwin GOARCH=amd64 go build
+        if: matrix.target == 'darwin_amd64'
+
+      # archive
+      - run: |
+          mv terraform-provider-esa terraform-provider-esa_${GITHUB_REF##*/}
+          zip --junk-paths terraform-provider-esa_${{ matrix.target }}.zip terraform-provider-esa*
+
+      # upload
+      - uses: actions/upload-artifact@v1
+        with:
+          name: build-${{ matrix.target }}
+          path: terraform-provider-esa_${{ matrix.target }}.zip
+
+  release:
+    needs: [build]
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+
+  upload:
+    needs: [release]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - linux_amd64
+          - darwin_amd64
+    steps:
+      - uses: actions/download-artifact@v1
+        with:
+          name: build-${{ matrix.target }}
+      - uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.release.outputs.upload_url }}
+          asset_path: ./build-${{ matrix.target }}/terraform-provider-esa_${{ matrix.target }}.zip
+          asset_name: terraform-provider-esa_${{ matrix.target }}.zip
+          asset_content_type: application/zip
