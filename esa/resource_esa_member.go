@@ -1,6 +1,9 @@
 package esa
 
 import (
+	"log"
+	"strings"
+
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 )
 
@@ -9,6 +12,9 @@ func resourceEsaMember() *schema.Resource {
 		Create: resourceEsaMemberCreate,
 		Read:   resourceEsaMemberRead,
 		Delete: resourceEsaMemberDelete,
+		Importer: &schema.ResourceImporter{
+			State: schema.ImportStatePassthrough,
+		},
 
 		Schema: map[string]*schema.Schema{
 			"email": &schema.Schema{
@@ -41,6 +47,30 @@ func resourceEsaMemberCreate(d *schema.ResourceData, m interface{}) error {
 }
 
 func resourceEsaMemberRead(d *schema.ResourceData, m interface{}) error {
+	api := m.(*Api)
+	log.Printf("[DEBUG] id: %s", d.Id())
+	parts := strings.SplitN(d.Id(), ":", 2)
+	email := parts[1]
+
+	d.Set("email", email)
+	members, _, _ := api.Members()
+	for _, member := range members.Members {
+		if member.Email == email {
+			return nil
+		}
+	}
+
+	invitations, _, err := api.PendingInvitations()
+	if err != nil {
+		return err
+	}
+
+	for _, invitation := range invitations.Invitations {
+		if invitation.Email == email {
+			d.Set("code", invitation.Code)
+		}
+	}
+
 	return nil
 }
 
